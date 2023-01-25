@@ -1,9 +1,6 @@
-import json
 import os
 import re
 import sys
-
-from Source.ObjectEncoder import ObjectEncoder
 
 # Might supplement this with parsing .gitignore
 default_ignore = [
@@ -33,15 +30,22 @@ def last_endpoint() -> Class:
     return res[len(res) - 1]
 
 
+def last_method() -> Method:
+    endpoint = last_endpoint()
+    return endpoint.methods[len(endpoint.methods) - 1]
+
+
 def parse_file(path: str) -> None:
     with open(path) as file:
-        lines = "\n".join(file.readlines())
+        lines = "".join(file.readlines())
         classes = re.split(r"class\s+(\w+)", lines, flags=re.MULTILINE)
         i = 0
         while i < len(classes):
             if re.match(r"^\w+$", classes[i]):  # Class name
                 res.append(Class(classes[i]))
                 i += 1
+                if i >= len(classes):
+                    continue
 
                 methods = re.split(r"[\w<>]+ (\w+)\s*\(", classes[i], flags=re.MULTILINE)
                 j = 0
@@ -49,9 +53,16 @@ def parse_file(path: str) -> None:
                     if re.match(r"^\w+$", methods[j]):  # Method name
                         last_endpoint().methods.append(Method(methods[j]))
                         j += 1
+                        if j >= len(methods):
+                            continue
 
-                        queries = re.split(r"(SELECT|UPDATE|INSERT|DELETE)(.*\n?)*\"", methods[j], flags=re.MULTILINE)
-                        print(queries)
+                        while methods[j]:
+                            query = re.search(r"(SELECT|UPDATE|INSERT|DELETE)(([^\"]*\n?)*)", methods[j], flags=re.MULTILINE)
+                            if query is None:
+                                break
+
+                            last_method().sql += "\n\n" + methods[j][query.regs[0][0]:query.regs[2][1]]
+                            methods[j] = methods[j][query.regs[1][1]:]
 
                     j += 1
 
@@ -76,4 +87,16 @@ if __name__ == '__main__':
     root = sys.argv[1]
     search_files(root)
 
-    print(json.dumps(res, cls=ObjectEncoder, indent=4).replace("    ", "\t"))
+    for c in res:
+        for m in c.methods:
+            m.sql = m.sql.strip("\n\r ")
+
+        c.methods = [x for x in c.methods if x.sql != ""]
+
+    res = [x for x in res if len(x.methods) > 0]
+
+    for c in res:
+        print(f"Class: {c.class_name}")
+        for m in c.methods:
+            print(f'Method: {m.method_name}')
+            print(f"SQL: {m.sql}")
