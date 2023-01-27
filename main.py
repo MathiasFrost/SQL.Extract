@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from enum import Enum
 
 # Might supplement this with parsing .gitignore
 default_ignore = [
@@ -8,6 +9,18 @@ default_ignore = [
     "node_modules",
     "bin",
     "obj"
+]
+
+keywords = [
+    "public",
+    "private",
+    "protected",
+    "internal",
+    "async",
+    "static",
+    "override",
+    "virtual",
+    "abstract"
 ]
 
 
@@ -26,45 +39,120 @@ class Class:
 res: list[Class] = []
 
 
-def last_endpoint() -> Class:
+def last_class() -> Class:
     return res[len(res) - 1]
 
 
 def last_method() -> Method:
-    endpoint = last_endpoint()
+    endpoint = last_class()
     return endpoint.methods[len(endpoint.methods) - 1]
+
+
+class ParseAction(Enum):
+    NONE = 0
+    CLASS_BODY = 1
+    METHOD_BODY = 2
+
+
+white_space = "\n\r\t "
 
 
 def parse_file(path: str) -> None:
     with open(path) as file:
-        lines = "".join(file.readlines())
-        classes = re.split(r"class\s+(\w+)", lines, flags=re.MULTILINE)
+        content = "".join(file.readlines())
         i = 0
-        while i < len(classes):
-            if re.match(r"^\w+$", classes[i]):  # Class name
-                res.append(Class(classes[i]))
+        action = ParseAction.NONE
+        buffer = ""
+        is_in_comment = None
+        while i < len(content):
+            c = content[i]
+
+            if c == '/':  # Check if in comment
                 i += 1
-                if i >= len(classes):
-                    continue
+                c = content[i]
+                if c == '/':
+                    is_in_comment = "line"
+                if c == '*':
+                    is_in_comment = "block"
 
-                methods = re.split(r"[\w<>]+ (\w+)\s*\(", classes[i], flags=re.MULTILINE)
-                j = 0
-                while j < len(methods):
-                    if re.match(r"^\w+$", methods[j]):  # Method name
-                        last_endpoint().methods.append(Method(methods[j]))
-                        j += 1
-                        if j >= len(methods):
-                            continue
+            if is_in_comment is not None:  # Skip comments
+                i += 1
+                c = content[i]
+                if c == '\n' and is_in_comment == "line":
+                    is_in_comment = None
+                elif c == '*' and is_in_comment == "block":
+                    i += i
+                    c = content[i]
+                    if c == '/':
+                        is_in_comment = None
+                continue
 
-                        while methods[j]:
-                            query = re.search(r"(SELECT|UPDATE|INSERT|DELETE)(([^\"]*\n?)*)", methods[j], flags=re.MULTILINE)
-                            if query is None:
+            if action == ParseAction.NONE:
+                if c in white_space:  # Check word
+                    match buffer:
+                        case "class":  # Class declaration
+                            i += 1
+                            c = content[i]
+                            while c in white_space:  # Skip whitespace between class keyword and class name
+                                i += 1
+                                c = content[i]
+
+                            buffer = ""
+                            while c not in white_space:
+                                buffer += c
+                                i += 1
+                                c = content[i]
+
+                            res.append(Class(buffer))
+                            action = ParseAction.CLASS_BODY
+
+                    buffer = ""
+                else:
+                    buffer += c
+
+            elif action == ParseAction.CLASS_BODY:
+                # Search for type part of member declaration
+                if c == '(':  # Method indicator
+                    i -= 1
+                    c = content[i]
+                    while c in white_space:
+                        i -= 1
+                        c = content[i]
+
+                    buffer = ""
+                    while c not in white_space:
+                        buffer += c
+                        i -= 1
+                        c = content[i]
+
+                    i += len(buffer)
+                    buffer = buffer[::-1]
+                    last_class().methods.append(Method(buffer))
+                    buffer = ""
+                    action = ParseAction.METHOD_BODY
+                else:
+                    buffer += c
+
+            elif action == ParseAction.METHOD_BODY:
+                if c in white_space:
+                    if re.match(r"SELECT|INSERT|UPDATE|DELETE", buffer):  # SQL indicator
+                        while True:
+                            if c == '"':
                                 break
 
-                            last_method().sql += "\n\n" + methods[j][query.regs[0][0]:query.regs[2][1]]
-                            methods[j] = methods[j][query.regs[1][1]:]
+                            buffer += c
+                            i += 1
+                            c = content[i]
 
-                    j += 1
+                        buffer = buffer.strip()
+                        last_method().sql = buffer
+
+                        buffer = ""
+                        action = ParseAction.CLASS_BODY
+                    else:
+                        buffer = ""
+                else:
+                    buffer += c
 
             i += 1
 
@@ -87,16 +175,16 @@ if __name__ == '__main__':
     root = sys.argv[1]
     search_files(root)
 
-    for c in res:
-        for m in c.methods:
-            m.sql = m.sql.strip("\n\r ")
+    for _class in res:
+        for m in _class.methods:
+            m.sql = re.sub(r"\{(\w+)[^}]*}", r":\1", m.sql.strip("\n\r "), flags=re.MULTILINE)
 
-        c.methods = [x for x in c.methods if x.sql != ""]
+        _class.methods = [x for x in _class.methods if x.sql != ""]
 
     res = [x for x in res if len(x.methods) > 0]
 
-    for c in res:
-        print(f"Class: {c.class_name}")
-        for m in c.methods:
+    for _class in res:
+        print(f"Class: {_class.class_name}")
+        for m in _class.methods:
             print(f'Method: {m.method_name}')
             print(f"SQL: {m.sql}")
