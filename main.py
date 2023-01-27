@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import sys
 from enum import Enum
 
@@ -176,15 +177,26 @@ if __name__ == '__main__':
     search_files(root)
 
     for _class in res:
+        _class.class_name = re.sub(r"(\w+)Controller$", r"\1", _class.class_name)
+        _class.methods = [x for x in _class.methods if x.sql != ""]
         for m in _class.methods:
             m.sql = re.sub(r"\{(\w+)[^}]*}", r":\1", m.sql.strip("\n\r "), flags=re.MULTILINE)
 
-        _class.methods = [x for x in _class.methods if x.sql != ""]
-
     res = [x for x in res if len(x.methods) > 0]
 
+    dir_name = os.path.basename(root)
+    dest = os.path.join(root, "..", sys.argv[2], dir_name)
+    shutil.rmtree(dest)
+    os.makedirs(dest)
+
     for _class in res:
-        print(f"Class: {_class.class_name}")
-        for m in _class.methods:
-            print(f'Method: {m.method_name}')
-            print(f"SQL: {m.sql}")
+        class_path = os.path.join(dest, _class.class_name)
+        os.mkdir(class_path)
+
+        for method in _class.methods:
+            file_path = os.path.join(class_path, method.method_name)
+            print(f'Writing to file {file_path}:\n{method.sql}\n')
+            with open(file_path + ".sql", 'x') as file:
+                file.write(method.sql + '\n')
+
+    print("Application executed successfully")
