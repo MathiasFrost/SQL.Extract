@@ -59,8 +59,8 @@ white_space = "\n\r\t "
 
 
 def parse_file(path: str) -> None:
-    with open(path) as file:
-        content = "".join(file.readlines())
+    with open(path) as read_file:
+        content = "".join(read_file.readlines())
         i = 0
         action = ParseAction.NONE
         buffer = ""
@@ -195,8 +195,8 @@ if __name__ == '__main__':
 
         for method in _class.methods:
             file_path = os.path.join(class_path, method.method_name)
-            print(f'Writing to file {file_path}:\n{method.sql}\n')
-            with open(file_path + ".sql", 'x') as file:
-                file.write(method.sql + '\n')
+            print(f'Writing to file \033[;35m{file_path}\033[0m:\n{method.sql}\n')
+            with open(file_path + ".sql", 'x') as write_file:
+                write_file.write(method.sql + '\n')
 
-    print("Application executed successfully")
+    print("\033[;32mApplication executed successfully\033[0m")
